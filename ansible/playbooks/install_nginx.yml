@@ -1,0 +1,46 @@
+---
+- name: Install and configure Nginx on web servers
+  hosts: web
+  become: true
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Deploy index page with hostname
+      template:
+        src: files/index.html.j2
+        dest: /var/www/html/index.html
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+    - name: Enable stub_status for Zabbix
+      blockinfile:
+        path: /etc/nginx/sites-available/default
+        marker: "# {mark} ANSIBLE MANAGED - stub_status"
+        insertbefore: '^}'
+        block: |
+          location = /stub_status {
+              stub_status;
+              access_log off;
+          }
+      notify: reload nginx
+
+    - name: Ensure Nginx is started and enabled
+      service:
+        name: nginx
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: reload nginx
+      service:
+        name: nginx
+        state: reloaded

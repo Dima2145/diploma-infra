@@ -1,0 +1,25 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+tf.plan
+crash.log
+.terraform.lock.hcl
+
+# Секреты — никогда в git
+sa-key.json
+*.pem
+.env
+terraform.tfvars
+
+# Ansible
+*.retry
+
+# Python
+__pycache__/
+*.pyc
+
+# Системное
+.DS_Store

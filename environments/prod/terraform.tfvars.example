@@ -1,0 +1,13 @@
+# Шаблон настроек. Скопируйте в terraform.tfvars и подставьте свои значения:
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# НЕ коммитьте terraform.tfvars — он в .gitignore.
+
+folder_id    = "b1XXXXXXXXXXXXXXXXXXXX"   # ID папки YC: yc resource-manager folder list
+project_name = "diploma-prod"
+zone_a       = "ru-central1-a"
+zone_b       = "ru-central1-b"
+service_account_key_file = "../../../sa-key.json"   # путь к JSON-ключу SA (вне репозитория!)
+public_ssh_key = "ssh-rsa AAAAB3Nza... user@host"     # публичный ключ — не секрет
+image_id     = "fd8XXXXXXXXXXXXXXXXXXX"  # yc compute image list --folder-id standard-images
+admin_ip     = "0.0.0.0/0"               # ваш реальный IP/32 — только в terraform.tfvars

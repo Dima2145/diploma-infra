@@ -1,0 +1,48 @@
+---
+- name: Install Zabbix Agent (active-only)
+  hosts: all
+  become: true
+  vars:
+    zbx_server: "zabbix-01.ru-central1.internal"
+
+  tasks:
+    - name: Add Zabbix 7.0 repository (jammy)
+      apt:
+        deb: https://repo.zabbix.com/zabbix/7.0/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_7.0+ubuntu22.04_all.deb
+      register: repo_added
+
+    - name: Apt update after repo add
+      apt:
+        update_cache: true
+      when: repo_added is changed
+
+    - name: Install Zabbix agent
+      apt:
+        name: zabbix-agent
+        state: present
+
+    - name: Configure agent
+      lineinfile:
+        path: /etc/zabbix/zabbix_agentd.conf
+        regexp: "^#?\\s*{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+      loop:
+        - { key: "ServerActive", value: "{{ zbx_server }}" }
+        - { key: "Server", value: "{{ zbx_server }}" }
+        - { key: "StartAgents", value: "0" }
+        - { key: "Hostname", value: "{{ inventory_hostname.split('.')[0] }}" }
+        - { key: "Timeout", value: "10" }
+        - { key: "HostMetadataItem", value: "system.uname" }
+      notify: restart zabbix-agent
+
+    - name: Enable and start agent
+      service:
+        name: zabbix-agent
+        state: started
+        enabled: true
+
+  handlers:
+    - name: restart zabbix-agent
+      service:
+        name: zabbix-agent
+        state: restarted

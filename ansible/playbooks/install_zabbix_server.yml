@@ -1,0 +1,122 @@
+---
+- name: Install Zabbix Server 7.0 + PostgreSQL + Nginx frontend
+  hosts: zabbix
+  become: true
+  vars:
+    zbx_db_name: zabbix
+    zbx_db_user: zabbix
+    zbx_db_pass: "ZabbixDb-2026-Strong!"
+    zbx_timezone: Europe/Moscow
+
+  tasks:
+    - name: Install prerequisites
+      apt:
+        name:
+          - wget
+          - gnupg
+          - postgresql
+          - python3-psycopg2
+        state: present
+        update_cache: true
+
+    - name: Add Zabbix 7.0 repository (jammy)
+      shell: |
+        wget -q https://repo.zabbix.com/zabbix/7.0/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_7.0+ubuntu22.04_all.deb -O /tmp/zabbix-release.deb
+        dpkg -i /tmp/zabbix-release.deb
+      args:
+        creates: /etc/apt/sources.list.d/zabbix.list
+      register: repo_added
+
+    - name: Apt update after repo add
+      apt:
+        update_cache: true
+      when: repo_added is changed
+
+    - name: Install Zabbix server, frontend, agent
+      apt:
+        name:
+          - zabbix-server-pgsql
+          - zabbix-frontend-php
+          - zabbix-nginx-conf
+          - zabbix-sql-scripts
+          - zabbix-agent
+        state: present
+        install_recommends: false
+
+    - name: Ensure PostgreSQL is running
+      service:
+        name: postgresql
+        state: started
+        enabled: true
+
+    - name: Create Zabbix DB user
+      become: true
+      become_user: postgres
+      postgresql_user:
+        name: "{{ zbx_db_user }}"
+        password: "{{ zbx_db_pass }}"
+
+    - name: Create Zabbix database
+      become: true
+      become_user: postgres
+      postgresql_db:
+        name: "{{ zbx_db_name }}"
+        owner: "{{ zbx_db_user }}"
+        encoding: UTF-8
+
+    - name: Import initial schema
+      shell: |
+        set -o pipefail
+        zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | sudo -u zabbix psql -v ON_ERROR_STOP=1 zabbix
+      args:
+        executable: /bin/bash
+        creates: /var/lib/postgresql/.zabbix_schema_imported
+      notify: mark schema imported
+
+    - name: Configure zabbix_server.conf
+      lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        regexp: "^#?\\s*{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+      loop:
+        - { key: "DBHost", value: "localhost" }
+        - { key: "DBName", value: "{{ zbx_db_name }}" }
+        - { key: "DBUser", value: "{{ zbx_db_user }}" }
+        - { key: "DBPassword", value: "{{ zbx_db_pass }}" }
+      notify: restart zabbix-server
+
+    - name: Configure PHP timezone
+      lineinfile:
+        path: /etc/zabbix/nginx.conf
+        regexp: "^(#\\s*)?php_value date.timezone"
+        line: "php_value date.timezone {{ zbx_timezone }}"
+      notify: restart zabbix-web
+
+    - name: Enable and start services
+      service:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - zabbix-server
+        - zabbix-agent
+        - nginx
+        - php8.1-fpm
+
+  handlers:
+    - name: mark schema imported
+      copy:
+        content: "done\n"
+        dest: /var/lib/postgresql/.zabbix_schema_imported
+        owner: postgres
+        group: postgres
+
+    - name: restart zabbix-server
+      service:
+        name: zabbix-server
+        state: restarted
+
+    - name: restart zabbix-web
+      service:
+        name: nginx
+        state: restarted

@@ -1,0 +1,174 @@
+---
+- name: Elasticsearch
+  hosts: elastic
+  become: true
+  vars:
+    es_version: "7.17.29"
+    es_deb_url: "https://mirror.yandex.ru/mirrors/elastic/7/pool/main/e/elasticsearch/elasticsearch-{{ es_version }}-amd64.deb"
+  tasks:
+    - name: Download Elasticsearch deb from Yandex mirror
+      ansible.builtin.get_url:
+        url: "{{ es_deb_url }}"
+        dest: "/tmp/elasticsearch-{{ es_version }}-amd64.deb"
+        mode: "0644"
+        timeout: 600
+
+    - name: Install Elasticsearch
+      ansible.builtin.apt:
+        deb: "/tmp/elasticsearch-{{ es_version }}-amd64.deb"
+
+    - name: Ensure ES directories exist and are owned by elasticsearch
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: elasticsearch
+        group: elasticsearch
+        mode: "0755"
+      loop:
+        - /usr/share/elasticsearch/data
+        - /usr/share/elasticsearch/logs
+        - /var/lib/elasticsearch
+        - /var/log/elasticsearch
+        - /etc/elasticsearch
+
+    - name: Kernel tuning for Elasticsearch
+      ansible.posix.sysctl:
+        name: vm.max_map_count
+        value: "262144"
+        sysctl_set: true
+        state: present
+
+    - name: Configure Elasticsearch
+      ansible.builtin.copy:
+        dest: /etc/elasticsearch/elasticsearch.yml
+        content: |
+          network.host: 0.0.0.0
+          http.port: 9200
+          discovery.type: single-node
+          xpack.security.enabled: false
+          node.name: elastic-01
+      notify: restart elasticsearch
+
+    - name: Heap 1g
+      ansible.builtin.lineinfile:
+        path: /etc/elasticsearch/jvm.options
+        regexp: '^-Xm[sx]'
+        line: "-Xms1g"
+        insertafter: '^# -Xm[sx]'
+      notify: restart elasticsearch
+
+    - name: Enable and start
+      ansible.builtin.systemd:
+        name: elasticsearch
+        enabled: true
+        state: started
+
+  handlers:
+    - name: restart elasticsearch
+      ansible.builtin.systemd:
+        name: elasticsearch
+        state: restarted
+
+- name: Filebeat on web servers
+  hosts: web
+  become: true
+  vars:
+    fb_version: "7.17.29"
+    fb_deb_url: "https://mirror.yandex.ru/mirrors/elastic/7/pool/main/f/filebeat/filebeat-{{ fb_version }}-amd64.deb"
+    es_host: "10.0.1.6"
+    kibana_host: "10.0.1.23"
+  tasks:
+    - name: Download filebeat deb from Yandex mirror
+      ansible.builtin.get_url:
+        url: "{{ fb_deb_url }}"
+        dest: "/tmp/filebeat-{{ fb_version }}-amd64.deb"
+        mode: "0644"
+        timeout: 300
+
+    - name: Install filebeat
+      ansible.builtin.apt:
+        deb: "/tmp/filebeat-{{ fb_version }}-amd64.deb"
+
+    - name: Enable nginx module
+      ansible.builtin.command: filebeat modules enable nginx
+      changed_when: false
+
+    - name: Configure filebeat
+      ansible.builtin.copy:
+        dest: /etc/filebeat/filebeat.yml
+        content: |
+          filebeat.config.modules:
+            path: ${path.config}/modules.d/*.yml
+            reload.enabled: false
+
+          output.elasticsearch:
+            hosts: ["{{ es_host }}:9200"]
+
+          setup.kibana:
+            host: "{{ kibana_host }}:5601"
+      notify: restart filebeat
+
+    - name: Nginx module paths
+      ansible.builtin.copy:
+        dest: /etc/filebeat/modules.d/nginx.yml
+        content: |
+          - module: nginx
+            access:
+              enabled: true
+              var.paths: ["/var/log/nginx/access.log"]
+            error:
+              enabled: true
+              var.paths: ["/var/log/nginx/error.log"]
+      notify: restart filebeat
+
+    - name: Enable and start filebeat
+      ansible.builtin.systemd:
+        name: filebeat
+        enabled: true
+        state: started
+
+  handlers:
+    - name: restart filebeat
+      ansible.builtin.systemd:
+        name: filebeat
+        state: restarted
+
+- name: Kibana
+  hosts: kibana
+  become: true
+  vars:
+    kb_version: "7.17.29"
+    kb_deb_url: "https://mirror.yandex.ru/mirrors/elastic/7/pool/main/k/kibana/kibana-{{ kb_version }}-amd64.deb"
+    es_host: "10.0.1.6"
+  tasks:
+    - name: Download kibana deb from Yandex mirror
+      ansible.builtin.get_url:
+        url: "{{ kb_deb_url }}"
+        dest: "/tmp/kibana-{{ kb_version }}-amd64.deb"
+        mode: "0644"
+        timeout: 600
+
+    - name: Install kibana
+      ansible.builtin.apt:
+        deb: "/tmp/kibana-{{ kb_version }}-amd64.deb"
+
+    - name: Configure kibana
+      ansible.builtin.copy:
+        dest: /etc/kibana/kibana.yml
+        content: |
+          server.port: 5601
+          server.host: "0.0.0.0"
+          elasticsearch.hosts: ["http://{{ es_host }}:9200"]
+      notify: restart kibana
+
+    - name: Enable and start
+      ansible.builtin.systemd:
+        name: kibana
+        enabled: true
+        state: started
+
+  handlers:
+    - name: restart kibana
+      ansible.builtin.systemd:
+        name: kibana
+        state: restarted

@@ -1,0 +1,12 @@
+---
+- name: Import Nginx
+  ansible.builtin.import_playbook: install_nginx.yml
+
+- name: Import Elasticsearch stack
+  ansible.builtin.import_playbook: elastic_stack.yml
+
+- name: Import Zabbix agent
+  ansible.builtin.import_playbook: install_zabbix_agent.yml
+
+- name: Import Zabbix server
+  ansible.builtin.import_playbook: install_zabbix_server.yml
